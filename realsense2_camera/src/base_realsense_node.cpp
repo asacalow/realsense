@@ -93,6 +93,7 @@ BaseRealSenseNode::BaseRealSenseNode(ros::NodeHandle& nodeHandle,
 void BaseRealSenseNode::publishTopics()
 {
     getParameters();
+    setupPostProcessing();
     setupDevice();
     setupPublishers();
     setupStreams();
@@ -173,6 +174,58 @@ void BaseRealSenseNode::getParameters()
     _pnh.param("aligned_depth_to_infra1_frame_id",  _depth_aligned_frame_id[INFRA1],  DEFAULT_ALIGNED_DEPTH_TO_INFRA1_FRAME_ID);
     _pnh.param("aligned_depth_to_infra2_frame_id",  _depth_aligned_frame_id[INFRA2],  DEFAULT_ALIGNED_DEPTH_TO_INFRA2_FRAME_ID);
     _pnh.param("aligned_depth_to_fisheye_frame_id", _depth_aligned_frame_id[FISHEYE], DEFAULT_ALIGNED_DEPTH_TO_FISHEYE_FRAME_ID);
+
+    _pnh.param("aligned_depth_to_fisheye_frame_id", _depth_aligned_frame_id[FISHEYE], DEFAULT_ALIGNED_DEPTH_TO_FISHEYE_FRAME_ID);
+
+    // TODO: verify these values are correct.
+    _pnh.param("spatial_filter", _active_spatial_filter, DEFAULT_ACTIVE_SPATIAL); 
+    _pnh.param("spatial_delta", _spatial_delta, DEFAULT_SPATIAL_DELTA);
+    _pnh.param("spatial_alpha", _spatial_alpha, DEFAULT_SPATIAL_ALPHA); 
+    _pnh.param("spatial_iterations", _spatial_iterations, DEFAULT_SPATIAL_ITERATIONS);
+
+    _pnh.param("temporal_filter", _active_temporal_filter, DEFAULT_ACTIVE_TEMPORAL);
+    _pnh.param("temporal_alpha", _temporal_alpha, DEFAULT_TEMPORAL_ALPHA);
+    _pnh.param("temporal_delta", _temporal_delta, DEFAULT_TEMPORAL_DELTA);
+    _pnh.param("temporal_persistence", _temporal_persistence, DEFAULT_TEMPORAL_PERSISTENCE);
+
+    _pnh.param("holes_filter", _active_holes_filter, DEFAULT_ACTIVE_HOLES);
+    _pnh.param("holes_filling_mode", _holes_filling_mode, DEFAULT_HOLES_FILLING_MODE);
+
+    _pnh.param("holes_filter", _active_holes_filter, DEFAULT_ACTIVE_HOLES);
+    _pnh.param("holes_filling_mode", _holes_filling_mode, DEFAULT_HOLES_FILLING_MODE);
+
+    _pnh.param("decimation_filter", _active_decimation_filter, DEFAULT_ACTIVE_DECIMATION);
+    _pnh.param("dec_downsample_scale", _decimation_downsample_scale, DEFAULT_DEC_DOWNSAMPLE_SCALE);
+}
+
+void BaseRealSenseNode::setupPostProcessing()
+{
+    // Set spatial filter options
+    if (_active_spatial_filter) 
+    {
+        spatial_filter->set_option(RS2_OPTION_FILTER_SMOOTH_ALPHA, _spatial_alpha);
+        spatial_filter->set_option(RS2_OPTION_FILTER_SMOOTH_DELTA, (uint8_t)_spatial_delta);
+        spatial_filter->set_option(RS2_OPTION_FILTER_MAGNITUDE, (float)_spatial_iterations);
+        //spatial_filter->set_option(RS2_OPTION_HOLES_FILL, _holes_filling_mode); // Disabled
+    }
+    // Temporal filter options
+    if (_active_temporal_filter) 
+    {
+        temporal_filter->set_option(RS2_OPTION_FILTER_SMOOTH_ALPHA, _temporal_alpha);
+        temporal_filter->set_option(RS2_OPTION_FILTER_SMOOTH_DELTA, (uint8_t)_temporal_delta);
+        temporal_filter->set_option(RS2_OPTION_HOLES_FILL, (uint8_t)_temporal_persistence);
+    }
+    // Holes filter options
+    if (_active_holes_filter)
+    {
+        hole_filling_filter->set_option(RS2_OPTION_HOLES_FILL, _holes_filling_mode); 
+    }
+
+    // Decimation filter options
+    if (_active_decimation_filter)
+    {
+        decimation_filter->set_option(RS2_OPTION_FILTER_MAGNITUDE, (float) _decimation_downsample_scale);
+    }
 }
 
 void BaseRealSenseNode::setupDevice()
@@ -434,13 +487,23 @@ void BaseRealSenseNode::alignFrame(const rs2_intrinsics& from_intrin,
 
 rs2::frame BaseRealSenseNode::postProcessFrame(rs2::frame frame) 
 {
-    // auto f = decimation_filter->process(frame); // decimation filter not added yet
     auto f = depth_to_disparity->process(frame);
-    f = spatial_filter->process(f);
-    f = temporal_filter->process(f);
+    if (_active_spatial_filter) {
+      f = spatial_filter->process(f);
+    }
+    if (_active_temporal_filter) {
+      f = temporal_filter->process(f);
+    }
+    if (_active_holes_filter) {
+      f = hole_filling_filter->process(f);
+    }
+    //if (_active_decimation_filter) { TODO: implement decimation filter
+    //  this may require resizing the image back to the desired size after the decimation.
+    //  Look at example code in librealsense: unit-tests-post-processing.cpp
+    //}
+     // auto video_profile = frame.get_profile().as<rs2::video_stream_profile>();
+     // updateStreamCalibData(video_profile);
     frame = disparity_to_depth->process(f);
-    // auto video_profile = frame.get_profile().as<rs2::video_stream_profile>();
-    // updateStreamCalibData(video_profile);
     return frame;
 }
 
